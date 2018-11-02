@@ -42,7 +42,7 @@ class DeNoiser(object):
         if feature_scale == None:
             feature_scale = lambda:((2*np.ones(len(self.kernels)))**np.arange(len(self.kernels))).astype('int')
             self.feature_scale = feature_scale()
-        elseif isinstance(self.depth_scale,types.FunctionType):
+        elif isinstance(self.depth_scale,types.FunctionType):
             self.feature_scale = feature_scale()
         else:
             self.feature_scale = feature_scale
@@ -108,7 +108,7 @@ class DeNoiser(object):
         self.D.summary()
         return self.D
     
-    def denoiser(self):
+    def denoiser_model(self):
         if self.AE:
             return self.AE
         optimizer = Adam(lr=0.0002,beta_1=0.5, decay=0)
