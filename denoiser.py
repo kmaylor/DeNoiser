@@ -8,7 +8,7 @@ from os import makedirs
 import types
 from keras.models import Sequential, load_model, model_from_json
 from keras.layers import Dense, Activation, Flatten, Reshape
-from keras.layers import Conv1D, Conv2D, Cropping2D, Cropping1D, UpSampling1D
+from keras.layers import Conv1D, Conv2D, Conv3D,Cropping3D, Cropping2D, Cropping1D, UpSampling1D, UpSampling3D
 from keras.layers import LeakyReLU, Dropout, Lambda
 from keras.optimizers import Adam
 from keras.backend import log, count_params, int_shape
@@ -20,7 +20,7 @@ import os
 
 class DeNoiser(object):
     
-    def __init__(self, dims,
+    def __init__(self, dimensions,
                        channel=1,
                        min_features=64,
                        drop_rate=[.4,.4],
@@ -28,8 +28,20 @@ class DeNoiser(object):
                        strides = [2,2,2,2,2],
                        feature_scale = None,
                        ):
-
-        self.dims = dims
+        """
+        dimensions: list of the size of each dimension of the data
+        channel: number of channels
+        min_features: minimum number of features to use in the first layer of the encoder
+                      increases according to feature_scale with each layer
+        drop_rate: 2 element list containing the drop rate for the encoder and decoder
+        kernels: size of the kernels for each layer, also the length of the shorter of  
+                 kernels or strides determines the number of layers
+        strides: amount by which to scale features, also the length of the shorter of  
+                 kernels or strides determines the number of layers
+        feature_scale: function or list which determines how to scale the number of 
+                       features in each layer, default is a factor of two
+        """
+        self.dims = dimensions
         self.channel = channel
         self.E = None   # encoder
         self.D = None   # decoder
@@ -39,6 +51,7 @@ class DeNoiser(object):
         self.d_drop_r = drop_rate[1]
         self.kernels = kernels
         self.strides = strides
+        #Set scaling for features
         if feature_scale == None:
             feature_scale = lambda:((2*np.ones(len(self.kernels)))**np.arange(len(self.kernels))).astype('int')
             self.feature_scale = feature_scale()
@@ -46,22 +59,37 @@ class DeNoiser(object):
             self.feature_scale = feature_scale()
         else:
             self.feature_scale = feature_scale
-        self.Conv = self.set_convolution(dims)
-        self.UpS = self.set_upsample(dims)
+        #Set dimensions of upscaling and convolution 
+        self.Conv = self.set_convolution()
+        self.UpS = self.set_upsample()
+        self.Cropping = self.set_cropping()
     
-    def set_convolution(self,dims):
-        d = len(dims)
+    def set_convolution(self):
+        d = len(self.dims)
         if d == 1:
             return Conv1D
         elif d == 2:
             return Conv2D
+        else:
+            return Conv3D
             
-    def set_upsample(self,dims):
-        d = len(dims)
+    def set_upsample(self):
+        d = len(self.dims)
         if d == 1:
             return UpSampling1D
         elif d == 2:
             return self.UpSampling2DBilinear
+        else:
+            return UpSampling3D
+    
+    def set_cropping(self):
+        d = len(self.dims)
+        if d == 1:
+            return Cropping1D
+        elif d == 2:
+            return Cropping2D
+        else:
+            return Cropping3D
     
     def encoder(self):
         if self.E:
@@ -103,9 +131,14 @@ class DeNoiser(object):
             self.D.add(Dropout(dropout,name='drop_%i'%(i+2)))
         self.D.add(self.Conv(1, self.kernels[-1], strides=1, padding='same',name='D_con_%i'%(i+3)))
         self.D.add(Activation('tanh', name = 'Tanh'))
-        self.D.add(Cropping1D(cropping=(8,8), name='Crop'))
+        diff = lambda i,d: int((self.D.get_layer('Tanh').output_shape[i+1]-d)/2)
+        crop_size = [(diff(i,d),diff(i,d)) for i,d in enumerate(self.dims)] 
+        if len(self.dims)==1: crop_size=crop_size[0]
+        self.D.add(self.Cropping(cropping=crop_size, name='Crop_%iD'%(len(self.dims))))
         self.D.summary()
         return self.D
+    
+    
     
     def denoiser_model(self):
         if self.ED:
